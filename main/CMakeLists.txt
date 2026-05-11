@@ -1,0 +1,25 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "spi_bus.c"
+        "hc594.c"
+        "adc084s021.c"
+        "mag_sensor.c"
+        "display.c"
+        "nvs_storage.c"
+        "buttons.c"
+        "mode_test.c"
+        "mode_learn.c"
+        "mode_verify.c"
+        "mode_options.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        driver
+        nvs_flash
+        esp_lcd
+        freertos
+        esp_timer
+        spi_flash
+        esp_hw_support
+        esp_rom
+)
