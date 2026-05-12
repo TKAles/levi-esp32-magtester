@@ -33,9 +33,13 @@ static void sr_write_byte(uint8_t data)
 {
     spi_device_handle_t spi = spi_get_adc_handle();
 
+    /* Static buffer ensures word-alignment for DMA-capable bus */
+    static uint8_t tx_buf WORD_ALIGNED_ATTR;
+    tx_buf = data;
+
     spi_transaction_t t = {
-        .length    = 8,              /* bits */
-        .tx_buffer = &data,
+        .length    = 8,
+        .tx_buffer = &tx_buf,
         .rx_buffer = NULL,
         .flags     = 0,
     };
