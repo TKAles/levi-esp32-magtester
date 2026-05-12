@@ -3,7 +3,7 @@
 #include "hc594.h"
 #include "adc084s021.h"
 #include "mag_sensor.h"
-#include "display.h"
+#include "serial_protocol.h"
 #include "nvs_storage.h"
 #include "buttons.h"
 #include "app_state.h"
@@ -19,6 +19,8 @@
 #include "freertos/queue.h"
 #include "esp_timer.h"
 
+#include <string.h>
+
 static const char *TAG = "main";
 
 /* =========================================================================
@@ -27,24 +29,23 @@ static const char *TAG = "main";
 
 static void hw_init(void)
 {
-    /* SPI bus must come first; hc594 and display use it */
     ESP_ERROR_CHECK(spi_bus_init());
     ESP_ERROR_CHECK(hc594_init());
-    ESP_ERROR_CHECK(display_init());
     ESP_ERROR_CHECK(nvs_storage_init());
     ESP_ERROR_CHECK(buttons_init());
+    serial_protocol_init();
 }
 
 static void app_state_init(app_state_t *state)
 {
+    memset(state, 0, sizeof(*state));
     state->mode           = APP_MODE_TEST;
     state->options_cursor = 0;
+    state->learn_sub      = LEARN_SUB_IDLE;
+    state->verify_sub     = VERIFY_SUB_IDLE;
 
-    /* Load persisted settings */
     state->hysteresis  = nvs_storage_load_hyst();
     state->num_samples = nvs_storage_load_nsamples();
-
-    /* Load learned data (if any) */
     nvs_storage_load_learned(state->learned, &state->has_learned_data);
 }
 
@@ -76,39 +77,40 @@ static void cycle_mode(app_state_t *state)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Magnetic Field Visualiser starting up");
+    ESP_LOGI(TAG, "MagTester starting — serial companion mode");
 
     hw_init();
 
     app_state_t state;
     app_state_init(&state);
 
-    /* Show splash for 1 s */
-    display_clear(COLOR_BLACK);
-    display_draw_string(20, 50, "MagTester v1.0", COLOR_CYAN, COLOR_BLACK, 2);
-    display_flush();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    /* Enter initial mode */
     enter_mode(&state, APP_MODE_TEST);
 
     QueueHandle_t btn_queue = buttons_get_queue();
     button_event_t evt;
 
-    /* Track when we last updated the TEST mode display */
-    int64_t last_test_update_us = 0;
+    int64_t last_update_us = 0;
 
     ESP_LOGI(TAG, "Entering main loop");
 
     while (1) {
         /* ----------------------------------------------------------------
+         * Poll for commands from the companion app
+         * ---------------------------------------------------------------- */
+        int remote_cmd = serial_protocol_recv_cmd();
+        if (remote_cmd != 0) {
+            /* Inject as a synthetic button event */
+            evt.button_num = (uint8_t)(remote_cmd - 1);  /* 1→btn0, 2→btn1 */
+            xQueueSend(btn_queue, &evt, 0);
+        }
+
+        /* ----------------------------------------------------------------
          * Handle button events (non-blocking poll)
          * ---------------------------------------------------------------- */
         while (xQueueReceive(btn_queue, &evt, 0) == pdTRUE) {
-            ESP_LOGD(TAG, "Button %u pressed (mode=%d)", evt.button_num, state.mode);
+            ESP_LOGD(TAG, "Button %u (mode=%d)", evt.button_num, state.mode);
 
             if (evt.button_num == 0) {
-                /* D0: cycle mode, or advance OPTIONS cursor */
                 if (state.mode == APP_MODE_OPTIONS) {
                     int exit_opts = mode_options_d0(&state);
                     if (exit_opts) {
@@ -117,8 +119,8 @@ void app_main(void)
                 } else {
                     cycle_mode(&state);
                 }
+                serial_protocol_send(&state);
             } else if (evt.button_num == 1) {
-                /* D1: action depends on mode */
                 switch (state.mode) {
                     case APP_MODE_LEARN:
                         mode_learn_action(&state);
@@ -128,27 +130,29 @@ void app_main(void)
                         break;
                     case APP_MODE_OPTIONS:
                         mode_options_d1(&state);
+                        serial_protocol_send(&state);
                         break;
                     case APP_MODE_TEST:
                     default:
-                        /* D1 has no function in TEST mode */
                         break;
                 }
             }
         }
 
         /* ----------------------------------------------------------------
-         * Periodic TEST mode sensor refresh
+         * Periodic update: read sensors and send state to companion app
          * ---------------------------------------------------------------- */
-        if (state.mode == APP_MODE_TEST) {
-            int64_t now = esp_timer_get_time();
-            if ((now - last_test_update_us) >= (TEST_UPDATE_MS * 1000LL)) {
-                last_test_update_us = now;
+        int64_t now = esp_timer_get_time();
+        if ((now - last_update_us) >= (TEST_UPDATE_MS * 1000LL)) {
+            last_update_us = now;
+
+            if (state.mode == APP_MODE_TEST) {
                 mode_test_update(&state);
             }
+
+            serial_protocol_send(&state);
         }
 
-        /* Yield to other tasks / watchdog */
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
