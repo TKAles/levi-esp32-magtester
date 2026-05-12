@@ -51,7 +51,7 @@ class TestView(QWidget):
 
         painter.fillRect(0, 0, w, h, QColor("#0d1117"))
 
-        LABEL_MARGIN = 36       # space for ADC / channel labels
+        LABEL_MARGIN = 28       # space for ADC / channel labels
         GAP = 8
         CORNER = 6
 
@@ -71,25 +71,24 @@ class TestView(QWidget):
         grid_y = LABEL_MARGIN + (h - LABEL_MARGIN - grid_h) // 2
 
         font_size = max(10, int(cell_size * 0.28))
-        label_font = QFont("Consolas", max(9, int(cell_size * 0.22)))
-        label_font.setBold(True)
+        # Fixed small size for axis labels so they never overflow the margin
+        label_font = QFont("Segoe UI", 9)
         value_font = QFont("Consolas", font_size)
         value_font.setBold(True)
-        header_font = QFont("Segoe UI", max(9, int(cell_size * 0.20)))
 
-        # Column labels (ADC numbers)
-        painter.setFont(header_font)
+        # Column labels (A1 … A7)
+        painter.setFont(label_font)
         painter.setPen(QColor("#58a6ff"))
         for adc in range(NUM_ADCS):
             cx = grid_x + adc * (cell_size + GAP)
-            lbl_rect = QRect(cx, grid_y - LABEL_MARGIN + 4, cell_size, LABEL_MARGIN - 8)
-            painter.drawText(lbl_rect, Qt.AlignmentFlag.AlignCenter, f"ADC{adc + 1}")
+            lbl_rect = QRect(cx, 2, cell_size, LABEL_MARGIN - 4)
+            painter.drawText(lbl_rect, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter, f"A{adc + 1}")
 
-        # Row labels (channel numbers)
+        # Row labels (C0 … C3)
         for ch in range(CHANNELS_PER_ADC):
             cy = grid_y + ch * (cell_size + GAP)
-            lbl_rect = QRect(0, cy, grid_x - GAP, cell_size)
-            painter.drawText(lbl_rect, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter, f"CH{ch}")
+            lbl_rect = QRect(0, cy, LABEL_MARGIN - 4, cell_size)
+            painter.drawText(lbl_rect, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter, f"C{ch}")
 
         # Sensor cells
         for adc in range(NUM_ADCS):

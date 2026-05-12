@@ -16,8 +16,9 @@ class SerialWorker(QThread):
     GUI thread unblocked.
     """
 
-    state_received = pyqtSignal(dict)
-    connection_lost = pyqtSignal(str)
+    state_received    = pyqtSignal(dict)
+    raw_line_received = pyqtSignal(str)   # every parsed JSON line, as raw text
+    connection_lost   = pyqtSignal(str)
 
     def __init__(self, port: str, baud: int = 115200, parent=None):
         super().__init__(parent)
@@ -86,6 +87,7 @@ class SerialWorker(QThread):
                             try:
                                 packet = json.loads(line)
                                 self.state_received.emit(packet)
+                                self.raw_line_received.emit(line)
                             except json.JSONDecodeError:
                                 pass
                     elif byte != ord('\r'):

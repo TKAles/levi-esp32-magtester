@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 
 from PyQt6.QtCore import Qt, QTimer
@@ -11,8 +12,10 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -25,7 +28,8 @@ from verify_view import VerifyView
 from options_view import OptionsView
 
 _MODE_NAMES = {0: "TEST", 1: "LEARN", 2: "VERIFY", 3: "OPTIONS"}
-_MODE_KEYS  = list(_MODE_NAMES.keys())
+
+_LOG_MAX_LINES = 500
 
 
 class MainWindow(QMainWindow):
@@ -40,7 +44,6 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._connect_signals()
 
-        # Staleness indicator timer
         self._stale_timer = QTimer(self)
         self._stale_timer.timeout.connect(self._update_staleness)
         self._stale_timer.start(500)
@@ -58,7 +61,26 @@ class MainWindow(QMainWindow):
 
         root.addWidget(self._build_header())
         root.addWidget(self._build_mode_bar())
-        root.addWidget(self._build_content_stack(), stretch=1)
+
+        # Horizontal splitter: mode views on the left, protocol log on the right
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setHandleWidth(4)
+        self._splitter.setStyleSheet(
+            "QSplitter::handle { background: #21262d; }"
+        )
+
+        self._stack = self._build_content_stack()
+        self._splitter.addWidget(self._stack)
+
+        self._log_panel = self._build_log_panel()
+        self._splitter.addWidget(self._log_panel)
+        self._log_panel.setVisible(False)
+
+        # Give all initial space to the mode views
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 0)
+
+        root.addWidget(self._splitter, stretch=1)
         root.addWidget(self._build_control_bar())
 
     def _build_header(self) -> QFrame:
@@ -111,19 +133,67 @@ class MainWindow(QMainWindow):
         return frame
 
     def _build_content_stack(self) -> QStackedWidget:
-        self._stack = QStackedWidget()
+        stack = QStackedWidget()
 
         self._test_view    = TestView()
         self._learn_view   = LearnView()
         self._verify_view  = VerifyView()
         self._options_view = OptionsView()
 
-        self._stack.addWidget(self._test_view)     # index 0
-        self._stack.addWidget(self._learn_view)    # index 1
-        self._stack.addWidget(self._verify_view)   # index 2
-        self._stack.addWidget(self._options_view)  # index 3
+        stack.addWidget(self._test_view)
+        stack.addWidget(self._learn_view)
+        stack.addWidget(self._verify_view)
+        stack.addWidget(self._options_view)
 
-        return self._stack
+        return stack
+
+    def _build_log_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("log_panel")
+        panel.setMinimumWidth(320)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Panel header bar
+        header = QFrame()
+        header.setObjectName("log_panel_header")
+        header.setFixedHeight(36)
+        hdr_layout = QHBoxLayout(header)
+        hdr_layout.setContentsMargins(12, 0, 8, 0)
+        hdr_layout.setSpacing(8)
+
+        title = QLabel("PROTOCOL LOG")
+        title.setObjectName("log_panel_title")
+        hdr_layout.addWidget(title)
+        hdr_layout.addStretch()
+
+        self._log_pause_btn = QPushButton("⏸ Pause")
+        self._log_pause_btn.setObjectName("btn_log_action")
+        self._log_pause_btn.setFixedHeight(24)
+        self._log_pause_btn.setCheckable(True)
+        self._log_pause_btn.toggled.connect(self._on_log_pause_toggled)
+        hdr_layout.addWidget(self._log_pause_btn)
+
+        clear_btn = QPushButton("✕ Clear")
+        clear_btn.setObjectName("btn_log_action")
+        clear_btn.setFixedHeight(24)
+        clear_btn.clicked.connect(self._clear_log)
+        hdr_layout.addWidget(clear_btn)
+
+        layout.addWidget(header)
+
+        # Log text area
+        self._log_edit = QPlainTextEdit()
+        self._log_edit.setReadOnly(True)
+        self._log_edit.setObjectName("log_edit")
+        self._log_edit.setMaximumBlockCount(_LOG_MAX_LINES)
+        self._log_edit.setFont(QFont("Consolas", 10))
+        self._log_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(self._log_edit)
+
+        self._log_paused = False
+        return panel
 
     def _build_control_bar(self) -> QFrame:
         frame = QFrame()
@@ -151,6 +221,15 @@ class MainWindow(QMainWindow):
         self._stale_label.setObjectName("status_text")
         layout.addWidget(self._stale_label)
 
+        layout.addSpacing(16)
+
+        self._log_toggle_btn = QPushButton("◧  Protocol Log")
+        self._log_toggle_btn.setObjectName("btn_secondary")
+        self._log_toggle_btn.setFixedHeight(36)
+        self._log_toggle_btn.setCheckable(True)
+        self._log_toggle_btn.toggled.connect(self._toggle_log_panel)
+        layout.addWidget(self._log_toggle_btn)
+
         return frame
 
     # ------------------------------------------------------------------
@@ -159,6 +238,7 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self._worker.state_received.connect(self._on_state)
+        self._worker.raw_line_received.connect(self._on_raw_line)
         self._worker.connection_lost.connect(self._on_disconnect)
 
         QShortcut(QKeySequence("F11"), self).activated.connect(self._toggle_fullscreen)
@@ -178,15 +258,23 @@ class MainWindow(QMainWindow):
             self._stack.setCurrentIndex(mode)
             self._refresh_mode_tabs(mode)
 
-        # Delegate to the active view
         view = self._stack.currentWidget()
         if hasattr(view, "update_state"):
             view.update_state(state)
 
         self._pkt_label.setText(f"Packets: {self._packet_count:,}")
 
+    def _on_raw_line(self, line: str) -> None:
+        if self._log_paused or not self._log_panel.isVisible():
+            return
+        # Pretty-print the JSON for readability
+        try:
+            pretty = json.dumps(json.loads(line), separators=(", ", ":"))
+        except Exception:
+            pretty = line
+        self._log_edit.appendPlainText(pretty)
+
     def _on_disconnect(self, reason: str) -> None:
-        self._conn_dot.setObjectName("conn_dot_red")
         self._conn_dot.setStyleSheet("color: #f87171;")
         self._conn_label.setText(f"Disconnected — {reason}")
         self._d0_btn.setEnabled(False)
@@ -209,17 +297,33 @@ class MainWindow(QMainWindow):
     def _refresh_mode_tabs(self, active: int) -> None:
         for mode_id, lbl in self._mode_tabs.items():
             if mode_id == active:
-                lbl.setProperty("active", "true")
                 lbl.setStyleSheet(
                     "background: #1f6feb; color: #ffffff; border-radius: 4px; "
                     "font-weight: bold; padding: 0 12px;"
                 )
             else:
-                lbl.setProperty("active", "false")
                 lbl.setStyleSheet(
                     "background: #21262d; color: #8b949e; border-radius: 4px; "
                     "padding: 0 12px;"
                 )
+
+    # ------------------------------------------------------------------
+    # Log panel controls
+    # ------------------------------------------------------------------
+
+    def _toggle_log_panel(self, checked: bool) -> None:
+        self._log_panel.setVisible(checked)
+        if checked:
+            total = self._splitter.width()
+            self._splitter.setSizes([total - 420, 420])
+        self._log_toggle_btn.setText("◨  Hide Log" if checked else "◧  Protocol Log")
+
+    def _on_log_pause_toggled(self, paused: bool) -> None:
+        self._log_paused = paused
+        self._log_pause_btn.setText("▶ Resume" if paused else "⏸ Pause")
+
+    def _clear_log(self) -> None:
+        self._log_edit.clear()
 
     # ------------------------------------------------------------------
     # Button actions

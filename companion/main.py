@@ -164,6 +164,41 @@ QLabel#cursor_arrow {
     font-size: 18px;
 }
 
+/* ── Protocol log panel ───────────────────────────────────────────── */
+QFrame#log_panel {
+    background-color: #0d1117;
+    border-left: 1px solid #21262d;
+}
+QFrame#log_panel_header {
+    background-color: #161b22;
+    border-bottom: 1px solid #21262d;
+}
+QLabel#log_panel_title {
+    color: #58a6ff;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 2px;
+}
+QPlainTextEdit#log_edit {
+    background-color: #0d1117;
+    color: #8b949e;
+    border: none;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 10px;
+    selection-background-color: #1f6feb;
+}
+QPushButton#btn_log_action {
+    background-color: transparent;
+    color: #8b949e;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    font-size: 11px;
+    padding: 0 8px;
+    min-width: 60px;
+}
+QPushButton#btn_log_action:hover   { color: #e6edf3; border-color: #58a6ff; }
+QPushButton#btn_log_action:checked { color: #fde047; border-color: #fde047; }
+
 /* ── Connect dialog ───────────────────────────────────────────────── */
 QDialog {
     background-color: #0d1117;
