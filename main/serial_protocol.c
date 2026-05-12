@@ -1,54 +1,65 @@
 #include "serial_protocol.h"
 #include "config.h"
 
-#include "driver/uart.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#define SP_UART_NUM     UART_NUM_0
-#define SP_BAUD_RATE    115200
-#define SP_RX_BUF_SIZE  512
-
 static const char *TAG = "serial_proto";
 
-/* Accumulated line buffer for incoming commands */
-static char     s_rx_buf[128];
-static int      s_rx_pos = 0;
+/* Queue through which the RX task delivers parsed commands to the main loop */
+static QueueHandle_t s_cmd_queue;
 
 /* =========================================================================
- * Initialisation
+ * RX task — reads lines from stdin (USB Serial JTAG console) and enqueues
+ * button commands sent by the companion app.
+ * ========================================================================= */
+
+static void rx_task(void *arg)
+{
+    char buf[32];
+    int  pos = 0;
+
+    while (1) {
+        int ch = fgetc(stdin);
+
+        if (ch < 0) {
+            /* No data yet — yield so other tasks can run */
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        if ((char)ch == '\n' || (char)ch == '\r') {
+            if (pos > 0) {
+                buf[pos] = '\0';
+                uint8_t cmd = 0;
+                if      (strcmp(buf, "d0") == 0) cmd = 1;
+                else if (strcmp(buf, "d1") == 0) cmd = 2;
+                if (cmd != 0) {
+                    xQueueSend(s_cmd_queue, &cmd, 0);
+                }
+                pos = 0;
+            }
+        } else if (pos < (int)sizeof(buf) - 1) {
+            buf[pos++] = (char)ch;
+        }
+    }
+}
+
+/* =========================================================================
+ * Public API
  * ========================================================================= */
 
 void serial_protocol_init(void)
 {
-    uart_config_t cfg = {
-        .baud_rate           = SP_BAUD_RATE,
-        .data_bits           = UART_DATA_8_BITS,
-        .parity              = UART_PARITY_DISABLE,
-        .stop_bits           = UART_STOP_BITS_1,
-        .flow_ctrl           = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk          = UART_SCLK_DEFAULT,
-    };
-
-    uart_param_config(SP_UART_NUM, &cfg);
-
-    /* Install RX ring-buffer; TX buffer = 0 so writes go directly to the FIFO */
-    esp_err_t ret = uart_driver_install(SP_UART_NUM, SP_RX_BUF_SIZE, 0, 0, NULL, 0);
-    if (ret == ESP_ERR_INVALID_STATE) {
-        /* Driver already installed by the VFS console layer — RX will still work */
-        ESP_LOGW(TAG, "UART driver already installed, continuing");
-    } else {
-        ESP_ERROR_CHECK(ret);
-    }
-
-    ESP_LOGI(TAG, "Serial protocol ready at %d baud", SP_BAUD_RATE);
+    s_cmd_queue = xQueueCreate(8, sizeof(uint8_t));
+    xTaskCreate(rx_task, "serial_rx", 2048, NULL, 5, NULL);
+    ESP_LOGI(TAG, "Serial protocol ready on USB console");
 }
-
-/* =========================================================================
- * State serialisation → JSON
- * ========================================================================= */
 
 void serial_protocol_send(const app_state_t *state)
 {
@@ -70,14 +81,12 @@ void serial_protocol_send(const app_state_t *state)
            state->verify_sub,
            state->verify_num_bad);
 
-    /* Failed sensor indices */
     APPEND(",\"vb\":[");
     for (int i = 0; i < state->verify_num_bad; i++) {
         APPEND("%u%s", state->verify_bad[i], (i < state->verify_num_bad - 1) ? "," : "");
     }
     APPEND("]");
 
-    /* Averaged readings for failed sensors */
     APPEND(",\"va\":[");
     for (int i = 0; i < state->verify_num_bad; i++) {
         uint8_t idx = state->verify_bad[i];
@@ -85,43 +94,24 @@ void serial_protocol_send(const app_state_t *state)
     }
     APPEND("]");
 
-    /* Learned (reference) values for failed sensors */
     APPEND(",\"lb\":[");
     for (int i = 0; i < state->verify_num_bad; i++) {
         uint8_t idx = state->verify_bad[i];
         APPEND("%u%s", state->learned[idx], (i < state->verify_num_bad - 1) ? "," : "");
     }
-    APPEND("]}\n");
+    APPEND("]}");
 
 #undef APPEND
 
-    uart_write_bytes(SP_UART_NUM, pkt, n);
+    pkt[n] = '\0';
+    /* printf routes through the IDF console VFS (USB Serial JTAG) */
+    puts(pkt);   /* puts appends '\n' and is slightly faster than printf */
+    fflush(stdout);
 }
-
-/* =========================================================================
- * Command receive
- * ========================================================================= */
 
 int serial_protocol_recv_cmd(void)
 {
-    uint8_t ch;
-    int     cmd = 0;
-
-    while (uart_read_bytes(SP_UART_NUM, &ch, 1, 0) == 1) {
-        if (ch == '\n' || ch == '\r') {
-            if (s_rx_pos > 0) {
-                s_rx_buf[s_rx_pos] = '\0';
-                if (strcmp(s_rx_buf, "d0") == 0) {
-                    cmd = 1;
-                } else if (strcmp(s_rx_buf, "d1") == 0) {
-                    cmd = 2;
-                }
-                s_rx_pos = 0;
-            }
-        } else if (s_rx_pos < (int)sizeof(s_rx_buf) - 1) {
-            s_rx_buf[s_rx_pos++] = (char)ch;
-        }
-    }
-
-    return cmd;
+    uint8_t cmd = 0;
+    xQueueReceive(s_cmd_queue, &cmd, 0);
+    return (int)cmd;
 }
