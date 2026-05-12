@@ -90,7 +90,7 @@ esp_err_t display_init(void)
      * ----------------------------------------------------------------- */
     esp_lcd_panel_dev_config_t panel_cfg = {
         .reset_gpio_num   = TFT_RST_GPIO,
-        .rgb_endian       = LCD_RGB_ENDIAN_RGB,
+        .data_endian      = LCD_RGB_DATA_ENDIAN_BIG,
         .bits_per_pixel   = 16,
         .flags = {
             .reset_active_high = 0,
