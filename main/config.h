@@ -10,10 +10,15 @@
 #define TFT_RST_GPIO     40
 #define TFT_BL_GPIO      45
 
-/* SPI2 bus */
-#define SPI_SCK_GPIO     36
-#define SPI_MOSI_GPIO    35
-#define SPI_MISO_GPIO    37
+/*
+ * SPI2 bus — must use GPIOs outside the VDD_SPI domain (GPIO26–37).
+ * GPIO26–37 are powered by VDD_SPI which is 1.8V on this module,
+ * incompatible with the 3.3V 74HC594 (VIH_min = 2.31V).
+ * GPIO0–21 and GPIO38–48 are on the 3.3V VDDIO rails.
+ */
+#define SPI_SCK_GPIO     16
+#define SPI_MOSI_GPIO    14
+#define SPI_MISO_GPIO    15
 
 /* TFT display geometry */
 #define TFT_WIDTH        240
