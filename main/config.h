@@ -24,9 +24,9 @@
 /* =========================================================================
  * 74HC594 shift register pins
  * ========================================================================= */
-#define SR_RCLK_GPIO     12   /* Latch (storage register clock) */
-#define SR_SRCLR_GPIO    13   /* Shift register clear, active-low */
-#define SR_OE_GPIO       10   /* Output enable, active-low */
+#define SR_RCLK_GPIO     12   /* STCP  — storage register clock (latch) */
+#define SR_SRCLR_GPIO    13   /* nSHR  — shift register clear, active-low */
+#define SR_NRCLR_GPIO    11   /* nSTR  — storage register clear, active-low */
 
 /* =========================================================================
  * Buttons

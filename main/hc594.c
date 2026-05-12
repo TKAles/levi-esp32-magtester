@@ -49,11 +49,11 @@ static void sr_write_byte(uint8_t data)
 
 esp_err_t hc594_init(void)
 {
-    /* Configure RCLK, /SRCLR, /OE as outputs */
+    /* Configure RCLK, nSRCLR, nRCLR as outputs */
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << SR_RCLK_GPIO)  |
-                        (1ULL << SR_SRCLR_GPIO)  |
-                        (1ULL << SR_OE_GPIO),
+        .pin_bit_mask = (1ULL << SR_RCLK_GPIO)   |
+                        (1ULL << SR_SRCLR_GPIO)   |
+                        (1ULL << SR_NRCLR_GPIO),
         .mode         = GPIO_MODE_OUTPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -65,18 +65,18 @@ esp_err_t hc594_init(void)
         return ret;
     }
 
-    /* Initial state: outputs disabled, RCLK low */
-    gpio_set_level(SR_OE_GPIO,    1);   /* /OE high → outputs disabled */
+    /* Deassert both clears, RCLK low */
+    gpio_set_level(SR_SRCLR_GPIO, 1);   /* nSHR high — shift reg clear inactive */
+    gpio_set_level(SR_NRCLR_GPIO, 1);   /* nSTR high — storage reg clear inactive */
     gpio_set_level(SR_RCLK_GPIO,  0);
-    gpio_set_level(SR_SRCLR_GPIO, 1);   /* keep clear de-asserted */
 
-    /* Pulse /SRCLR low → high to clear the shift register */
+    /* Pulse nSRCLR low to clear the shift register */
     gpio_set_level(SR_SRCLR_GPIO, 0);
     ets_delay_us(2);
     gpio_set_level(SR_SRCLR_GPIO, 1);
     ets_delay_us(2);
 
-    /* Pre-load 0xFF (all CS deasserted) into storage register */
+    /* Pre-load 0xFF (all CS deasserted) into storage register and latch */
     sr_write_byte(0xFF);
     rclk_pulse();
 
@@ -91,15 +91,13 @@ void hc594_select(uint8_t adc_num)
 
     sr_write_byte(cs_byte);
     rclk_pulse();
-
-    /* Enable outputs */
-    gpio_set_level(SR_OE_GPIO, 0);
     ets_delay_us(1);
 }
 
 void hc594_deselect(void)
 {
-    /* Disable outputs only — storage register keeps its value */
-    gpio_set_level(SR_OE_GPIO, 1);
+    /* Shift in 0xFF (all CS deasserted) and latch — 74HC594 has no /OE */
+    sr_write_byte(0xFF);
+    rclk_pulse();
     ets_delay_us(1);
 }
