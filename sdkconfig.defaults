@@ -6,3 +6,8 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_SPIRAM_SUPPORT=n
 CONFIG_IDF_TARGET="esp32s3"
+
+# Route the ESP-IDF console (printf / ESP_LOGI / stdin) through the
+# ESP32-S3 native USB Serial JTAG peripheral.  This is the USB port
+# the companion app connects to; the CP2102N hardware UART is left free.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

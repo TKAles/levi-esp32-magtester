@@ -5,7 +5,7 @@ idf_component_register(
         "hc594.c"
         "adc084s021.c"
         "mag_sensor.c"
-        "display.c"
+        "serial_protocol.c"
         "nvs_storage.c"
         "buttons.c"
         "mode_test.c"
@@ -15,8 +15,9 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES
         driver
+        esp_driver_gpio
+        esp_driver_spi
         nvs_flash
-        esp_lcd
         freertos
         esp_timer
         spi_flash
