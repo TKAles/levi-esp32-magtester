@@ -34,13 +34,19 @@ static void sr_write_byte(uint8_t data)
     spi_device_handle_t spi = spi_get_adc_handle();
 
     /*
-     * SPI_TRANS_USE_TXDATA stores the byte inside the transaction struct,
-     * avoiding any external buffer pointer and DMA alignment concerns.
+     * Static buffer keeps the byte alive for the duration of the transfer
+     * and avoids SPI_TRANS_USE_TXDATA's tx_data[3]-first byte ordering on
+     * ESP32-S3 (the hardware loads tx_data as a LE uint32 and sends MSB
+     * first, so tx_data[0] ends up last, not first).
      */
+    static uint8_t tx_buf;
+    tx_buf = data;
+
     spi_transaction_t t = {
-        .length  = 8,
-        .flags   = SPI_TRANS_USE_TXDATA,
-        .tx_data = { data, 0, 0, 0 },
+        .length    = 8,
+        .tx_buffer = &tx_buf,
+        .rx_buffer = NULL,
+        .flags     = 0,
     };
 
     spi_device_polling_transmit(spi, &t);
